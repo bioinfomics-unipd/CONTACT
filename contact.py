@@ -3,11 +3,15 @@
 
 
 
+
 import pandas as pd
 import numpy as np
 import sys
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+
+
 
 
 
@@ -22,8 +26,12 @@ if len(sys.argv)!=6:
 
 
 
+
+
 # load NCBI database, with no header
 ncbi_data=pd.read_table(sys.argv[3],low_memory=False, header=None)
+
+
 
 
 
@@ -39,13 +47,19 @@ for col in list(ncbi_data.columns)[6:8]:
 
 
 
+
+
 # load checkM output table, header is line 0 
 checkM=pd.read_table(sys.argv[1], header=0, engine='python').set_index('Bin Id')
 
 
 
+
+
 # load conversion table with classification from gtdb to ncbi db
 classification=pd.read_table(sys.argv[2], header=0).set_index('user_genome')
+
+
 
 
 
@@ -72,6 +86,8 @@ tax_assigned=classification.iloc[l,1]
 
 
 
+
+
 # create dictionary with each MAG as key and taxonomy as value (user-defined level)
 
 dict_taxonomy={}
@@ -82,6 +98,8 @@ for i in range(len((tax_assigned))):
         dict_taxonomy[tax_assigned.index[i]]=tax_assigned[i].split(';')[5]
     elif sys.argv[4]=='species':
         dict_taxonomy[tax_assigned.index[i]]=tax_assigned[i].split(';')[6]
+
+
 
 
 
@@ -103,6 +121,8 @@ def stats(extracted):
 
 
 
+
+
 # create dictionary of tuples: each MAG is a key associated to a tuple calculated by stat function
 # statistics are calculated only if the number of extracted organisms from db is higher than the user-defined minimum number (default = 5)
 
@@ -120,14 +140,17 @@ for k in dict_taxonomy.keys():
 
 
 
+
+
 # prepare a new dataframe 
-output_table=pd.DataFrame(columns=['ID','taxonomy','genome_size_STD_from_avg','GC_content_STD_from_avg','completeness','contamination','genome_size','avg_genome_size_NCBI','std_genome_size_NCBI','GC_content','avg_GC_content_NCBI','std_GC_content_NCBI','number_of_genomes','size_diff','GC_diff','genome_size_STD_from_avg_>1','GC_content_STD_from_avg_>1']).set_index('ID')
+output_table=pd.DataFrame(columns=['ID','taxonomy','genome_size_STD_from_avg','expected_missing_exceeding_portion','completeness','contamination','genome_size','expected_genome_size','avg_genome_size_NCBI','std_genome_size_NCBI','GC_content','GC_content_STD_from_avg','avg_GC_content_NCBI','std_GC_content_NCBI','number_of_genomes','size_diff','GC_diff','genome_size_STD_from_avg_>1','GC_content_STD_from_avg_>1']).set_index('ID')
+
+
 
 
 
 # fill the columns of the dataframe with taxonomy, GC content, genome size, completeness, contamination for each MAG
 # new columns are created containing number of genomes, average and standard deviation for genome size and GC content from stat function
-# other columns are the the difference in genome size and GC content and the number of standard deviations each MAG is far from the average and also boolean columns to easily detect those that are more distant than 1 std
 
 for k in dict_taxonomy.keys():
     tax=dict_taxonomy.get(k)
@@ -142,17 +165,33 @@ for k in dict_taxonomy.keys():
         output_table.loc[k,'avg_GC_content_NCBI']=dict_stat[tax][2]
         output_table.loc[k,'std_GC_content_NCBI']=dict_stat[tax][4]
         output_table.loc[k,'number_of_genomes']=dict_stat[tax][0]
-        output_table['size_diff']=(output_table['genome_size']>=output_table['avg_genome_size_NCBI']).replace(to_replace=[True,False],value=['larger','smaller'])
+
+
+
+
+
+# other columns are the the difference in genome size and GC content and the number of STDs each MAG is far from the average
+# boolean columns to easily detect those that are more distant than 1 std
+# the expected genome size is calculated by subtracting the contaminated portion from the genome size and dividing by the completeness
+# the expected missing or exceeding portion is calculated subtracting the expected genome size by the average from NCBI
+
+output_table['size_diff']=(output_table['genome_size']>=output_table['avg_genome_size_NCBI']).replace(to_replace=[True,False],value=['larger','smaller'])
 output_table['GC_diff']=(output_table['GC_content']>=output_table['avg_GC_content_NCBI']).replace(to_replace=[True,False],value=['higher','lower'])
 output_table['genome_size_STD_from_avg']=(output_table['genome_size']-output_table['avg_genome_size_NCBI'])/output_table['std_genome_size_NCBI']
 output_table['GC_content_STD_from_avg']=(output_table['GC_content']-output_table['avg_GC_content_NCBI'])/output_table['std_GC_content_NCBI']
 output_table['genome_size_STD_from_avg_>1']=abs(output_table['genome_size_STD_from_avg'])>=1
 output_table['GC_content_STD_from_avg_>1']=abs(output_table['GC_content_STD_from_avg'])>=1
+output_table['expected_genome_size']=(output_table['genome_size']-(output_table['genome_size']*(output_table['contamination']/100)))/(output_table['completeness']/100)
+output_table['expected_missing_exceeding_portion']=output_table['expected_genome_size']-output_table['avg_genome_size_NCBI']
 
 
 
-# output table is created in the working directory in .csv format named with the taxonomic level and the minimum number of genomes considered when performing analyses
+
+
+# output table is created in the working directory in csv format named with the taxonomic level and the minimum number of genomes considered when performing analyses
 output_table.to_csv('output_table_'+str(sys.argv[4])+'_'+str(sys.argv[5])+'.csv')
+
+
 
 
 
@@ -163,6 +202,16 @@ output_table.to_csv('output_table_'+str(sys.argv[4])+'_'+str(sys.argv[5])+'.csv'
 plt.figure()
 sns.scatterplot(x='completeness',y='genome_size_STD_from_avg',data=output_table, hue='contamination').axhline(y=0)
 plt.savefig('scatterplot_'+str(sys.argv[4])+'_'+str(sys.argv[5])+'.pdf')
+
+
+
+
+
+# another scatterplot is showing the completeness as function of the expected missing or exceeding genomic portion
+
+plt.figure()
+sns.scatterplot(x='expected_missing_exceeding_portion',y='completeness',data=output_table).axvline(x=0, color='r')
+plt.savefig('scatterplot2_'+str(sys.argv[4])+'_'+str(sys.argv[5])+'.pdf')
 
 
 
